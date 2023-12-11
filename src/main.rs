@@ -1,5 +1,6 @@
 //use std::fmt::Debug;
 
+use rand::Rng;
 use bevy::{
     prelude::*, 
     window::CursorGrabMode,
@@ -7,8 +8,7 @@ use bevy::{
     input::mouse::MouseMotion,
 };
 
-
-
+ 
 
 #[derive(Component)]
 struct Person;
@@ -25,12 +25,11 @@ impl Plugin for HelloPlugin {
     fn build( &self, app: &mut App ) {
         
         app.insert_resource( GreetTimer( Timer::from_seconds(2.0, TimerMode::Repeating)))
+            .insert_resource(ClearColor(Color::rgb(0.3764, 0.47451, 0.6314 )))
             .init_resource::<DebugTools>()
-            .init_resource::<GameState>()
-            .add_systems( Startup, add_people )
-            .add_systems( Startup, fpz7_setup )
-            .add_systems( Update, toggle_debug_camera )
-            .add_systems( Update, greet_people )
+            .init_resource::<GameState>()            
+            .add_systems( Startup, (fpz7_setup, map_setup) )
+            .add_systems( Update, toggle_debug_camera )            
             .add_systems( Update, player_controller )
             .add_systems( Update, mouse_look )
             ;
@@ -70,12 +69,12 @@ fn fpz7_setup (
     window.cursor.grab_mode = CursorGrabMode::Locked;
 
     // circular base
-    commands.spawn( PbrBundle {
-        mesh: meshes.add(shape::Circle::new(4.0).into() ),
-        material: materials.add( Color::WHITE.into() ),
-        transform: Transform::from_rotation(Quat::from_rotation_x( -std::f32::consts::FRAC_PI_2)),
-        ..default()
-    });
+    // commands.spawn( PbrBundle {
+    //     mesh: meshes.add(shape::Circle::new(4.0).into() ),
+    //     material: materials.add( Color::WHITE.into() ),
+    //     transform: Transform::from_rotation(Quat::from_rotation_x( -std::f32::consts::FRAC_PI_2)),
+    //     ..default()
+    // });
 
     // gamestate and player
     game.ent_player = Some(
@@ -112,8 +111,8 @@ fn fpz7_setup (
 
     // Camera
     game.ent_fps_camera = Some( commands.spawn(Camera3dBundle {
-        transform: Transform::from_xyz(-2.5, 4.5, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
-
+        transform: Transform::from_xyz( 3.0, 1.5, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
+        projection: Projection::Perspective ( PerspectiveProjection { fov: std::f32::consts::PI / 2.0,  ..default() } ),        
         ..default()
     }).id() );
 
@@ -132,12 +131,44 @@ fn fpz7_setup (
 
 }
 
+// notes:
+//  zelda room size 16x11 tiles
+// world map is 258x88 tiles (16x8 rooms)
 
+fn map_setup (
+    mut commands : Commands,    
+    mut game: ResMut<GameState>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    ) {
+
+        for room_j in 0..11 {
+            for room_i in 0..16 {
+
+                //let secret_number = rand::thread_rng().gen_range(1..=100);
+                let mut rng = rand::thread_rng();
+                let room_color = Color::rgb_linear(
+                    rng.gen(), rng.gen(), rng.gen() );
+
+                commands.spawn(PbrBundle {
+                    mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
+                    material: materials.add(room_color.into()),
+                    transform: Transform::from_xyz(((room_i * 16) - (8*16)) as f32, -1.0, (room_j * 11) as f32 )
+                            .with_scale( Vec3 { x:16.0, y:0.1, z:11.0 }),
+                    
+                    ..default()
+                });
+            }
+        }
+}
+
+/*
 fn add_people( mut commands: Commands ) {
     commands.spawn((Person, Name("Elaina Proctor".to_string())));
     commands.spawn((Person, Name("Renzo Hume".to_string())));
     commands.spawn((Person, Name("Zayna Nieves".to_string())));
 }
+*/
 
 fn toggle_debug_camera( 
     mut windows: Query<&mut Window>,
@@ -189,18 +220,18 @@ fn player_controller(
     mut transforms: Query<&mut Transform>,
     ) 
     {
-        let move_speed = 10f32;
+        let move_speed = 2f32;
         let mut move_x : f32 = 0.0;
         let mut move_y : f32 = 0.0;
         
         if keyboard_input.pressed( KeyCode::W ) ||
             keyboard_input.pressed( KeyCode::Up ) {
-                move_y = move_y + move_speed;
+                move_y = move_y - move_speed;
             }
 
         if keyboard_input.pressed( KeyCode::S ) ||
             keyboard_input.pressed( KeyCode::Down ) {
-                move_y = move_y - move_speed;
+                move_y = move_y + move_speed;
             }
 
         if keyboard_input.pressed( KeyCode::A ) ||
@@ -213,11 +244,19 @@ fn player_controller(
                 move_x = move_x + move_speed;
             }
 
-        let move_dir_fwd = Vec3::Z;
-        let move_dir_right = Vec3::X;
-
         let curr = transforms.get( game.ent_player.unwrap() ).unwrap().clone();
+        let curr_cam = transforms.get( game.ent_fps_camera.unwrap() ).unwrap().clone();
+
         
+        let cam_fwd = curr_cam.rotation * Vec3::Z;
+
+        // Snap to ground for now (don't normalize this so we move slower when looking down)
+        let cam_fwd = Vec3 { x: cam_fwd.x, y: 0.0,  z:cam_fwd.z };
+
+        let move_dir_fwd = cam_fwd;
+        let move_dir_right = Vec3::cross( Vec3::Y, cam_fwd ).normalize();
+
+            
 
         let upd_pos = curr.translation + 
             (move_dir_fwd * move_y * time.delta_seconds() ) +
@@ -235,7 +274,7 @@ fn player_controller(
         player_transform.rotation = curr.rotation;
         
         let mut fps_camera_transform = transforms.get_mut(game.ent_fps_camera.unwrap()).unwrap();
-        let fps_cam_offset = Vec3 { x : 0.0, y : 1.5, z : 0.0 };
+        let fps_cam_offset = Vec3 { x : 0.0, y : 0.4, z : 0.0 };
         fps_camera_transform.translation = upd_pos + fps_cam_offset;
         //fps_camera_transform.rotation = curr.rotation;
 
@@ -272,6 +311,7 @@ fn mouse_look (
     }
 }
 
+/*
 fn greet_people( 
     time: Res<Time>,
     mut timer: ResMut<GreetTimer>, 
@@ -283,6 +323,7 @@ fn greet_people(
         }
     }
 }
+ */
 
 fn main() {
     App::new()
