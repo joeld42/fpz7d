@@ -6,6 +6,8 @@ use bevy::{
     window::CursorGrabMode,
     app::{AppExit, ScheduleRunnerPlugin},
     input::mouse::MouseMotion,
+    gltf::{Gltf, GltfMesh}, 
+    transform::commands
 };
 
  
@@ -29,6 +31,7 @@ impl Plugin for HelloPlugin {
             .init_resource::<DebugTools>()
             .init_resource::<GameState>()            
             .add_systems( Startup, (fpz7_setup, map_setup) )
+            .add_systems( Update, test_blarg )          
             .add_systems( Update, toggle_debug_camera )            
             .add_systems( Update, player_controller )
             .add_systems( Update, mouse_look )
@@ -44,18 +47,23 @@ struct DebugTools {
     dbg_cam : bool,
 }
 
+#[derive(Resource)]
+struct ZSceneAssets(Handle<Gltf>);
+
 #[derive(Resource,Default)]
 struct GameState {
     ent_player: Option<Entity>,
     ent_fps_camera: Option<Entity>,
+    ent_test: Option<Entity>,
 }
 
 
 fn fpz7_setup (
+    asset_server: Res<AssetServer>,
     mut commands : Commands,
     mut windows: Query<&mut Window>,
     mut dbg: ResMut<DebugTools>,
-    mut game: ResMut<GameState>,
+    mut game: ResMut<GameState>,    
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -75,6 +83,10 @@ fn fpz7_setup (
     //     transform: Transform::from_rotation(Quat::from_rotation_x( -std::f32::consts::FRAC_PI_2)),
     //     ..default()
     // });
+
+    // Kick off the gltf asset load
+    let gltf = asset_server.load("fpz7d.glb");
+    commands.insert_resource(ZSceneAssets(gltf) );
 
     // gamestate and player
     game.ent_player = Some(
@@ -131,22 +143,59 @@ fn fpz7_setup (
 
 }
 
+
+
+fn test_blarg(
+    mut commands : Commands,
+    zassets : Res<ZSceneAssets>,
+    assets_gltf : Res<Assets<Gltf>>,
+    assets_gltfmesh: Res<Assets<GltfMesh>>,
+    mut game: ResMut<GameState>,    
+    ) 
+{
+        println!("in test blarg...");
+        if game.ent_test.is_none() {
+            if let Some(gltf) = assets_gltf.get( &zassets.0 ) {
+                
+                println!("Gltf is loaded.\n");
+                for (sname, scene) in &gltf.named_scenes {
+                    println!("Scene is {}", sname );
+                }
+
+                for ( name, node) in &gltf.named_nodes {
+                    println!("Node is {}", name );                    
+                }   
+                
+                //let chunk = assets_gltfmesh.get(&gltf.named_meshes["CanyonChunk"]).unwrap();
+
+                // game.ent_test = Some( commands.spawn( PbrBundle {
+                //          mesh: chunk.primitives[0].mesh.clone(),
+                //          material: chunk.primitives[0].material.clone().unwrap(),
+                //          ..default()
+                //     }).id() );
+
+
+            } else {
+                println!("Gltf not loaded yet.\n");
+            }
+        }
+
+}
+
 // notes:
 //  zelda room size 16x11 tiles
 // world map is 258x88 tiles (16x8 rooms)
 
-fn map_setup (
-    mut commands : Commands,    
-    mut game: ResMut<GameState>,
+fn map_setup (    
+    mut commands : Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     ) {
 
-        // spawn the game board
-        let fpz7d_models = asset_server.load("assets/fpz7d.glb#Scene0");
-        
-        // iterate the models in the scene
-        let foo = fpz7d_models.named_scenes
+        // commands.spawn( SceneBundle {
+        //     scene: asset_server.load("fpz7d.glb#Scene0"),
+        //     ..default()
+        // });
 
         for room_j in 0..11 {
             for room_i in 0..16 {
@@ -298,7 +347,7 @@ fn mouse_look (
     let move_ang = 4.0 * (3.1416 / 180.0 );
 
     for ev in motion_evr.iter() {
-        println!("Mouse moved: X: {} px, Y: {} px", ev.delta.x, ev.delta.y);
+        //println!("Mouse moved: X: {} px, Y: {} px", ev.delta.x, ev.delta.y);
 
         let rot_x = -ev.delta.x * lookstr;
         let rot_y = -ev.delta.y * lookstr;
