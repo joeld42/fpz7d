@@ -142,13 +142,19 @@ fn map_setup (
     mut materials: ResMut<Assets<StandardMaterial>>,
     ) {
 
+        // spawn the game board
+        let fpz7d_models = asset_server.load("assets/fpz7d.glb#Scene0");
+        
+        // iterate the models in the scene
+        let foo = fpz7d_models.named_scenes
+
         for room_j in 0..11 {
             for room_i in 0..16 {
 
                 //let secret_number = rand::thread_rng().gen_range(1..=100);
                 let mut rng = rand::thread_rng();
                 let room_color = Color::rgb_linear(
-                    rng.gen(), rng.gen(), rng.gen() );
+                    rng.gen(), rng.gen(), rng.gen() );                
 
                 commands.spawn(PbrBundle {
                     mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
