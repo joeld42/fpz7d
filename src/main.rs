@@ -31,7 +31,7 @@ impl Plugin for HelloPlugin {
             .init_resource::<DebugTools>()
             .init_resource::<GameState>()            
             .add_systems( Startup, (fpz7_setup, map_setup) )
-            .add_systems( Update, test_blarg )          
+            //.add_systems( Update, test_blarg )          
             .add_systems( Update, toggle_debug_camera )            
             .add_systems( Update, player_controller )
             .add_systems( Update, mouse_look )
@@ -135,7 +135,7 @@ fn fpz7_setup (
             is_active: false,
             ..default()
         },
-        transform: Transform::from_xyz(0.0, 1.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),        
+        transform: Transform::from_xyz(0.0, 30.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),        
         ..default()
         },
         DebugCamera,
@@ -174,6 +174,8 @@ fn test_blarg(
                 //          ..default()
                 //     }).id() );
 
+                commands.remove_resource::<ZSceneAssets>();
+
 
             } else {
                 println!("Gltf not loaded yet.\n");
@@ -187,6 +189,7 @@ fn test_blarg(
 // world map is 258x88 tiles (16x8 rooms)
 
 fn map_setup (    
+    asset_server: Res<AssetServer>,
     mut commands : Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -197,7 +200,17 @@ fn map_setup (
         //     ..default()
         // });
 
-        for room_j in 0..11 {
+        let canyon_scene = asset_server.load("CanyonChunk.glb#Scene0");
+
+        let ground_scene = asset_server.load("Ground.glb#Scene0");
+
+        // commands.spawn( SceneBundle {
+        //     scene: canyon_scene,
+        //     transform: Transform::from_xyz( 10.0, 0.0, 10.0 ),
+        //     ..default()
+        // });
+
+        for room_j in 0..8 {
             for room_i in 0..16 {
 
                 //let secret_number = rand::thread_rng().gen_range(1..=100);
@@ -205,17 +218,67 @@ fn map_setup (
                 let room_color = Color::rgb_linear(
                     rng.gen(), rng.gen(), rng.gen() );                
 
-                commands.spawn(PbrBundle {
-                    mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
-                    material: materials.add(room_color.into()),
-                    transform: Transform::from_xyz(((room_i * 16) - (8*16)) as f32, -1.0, (room_j * 11) as f32 )
-                            .with_scale( Vec3 { x:16.0, y:0.1, z:11.0 }),
+                // ground plane for room                
+                // commands.spawn(PbrBundle {
+                //     mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
+                //     material: materials.add(room_color.into()),
+                //     transform: Transform::from_xyz(((room_i * 16) - (8*16)) as f32, hite, (room_j * 11) as f32 + 5.5 )
+                //             .with_scale( Vec3 { x:16.0, y:0.1, z:11.0 }),
                     
+                //     ..default()
+                // });
+
+                let room_origin = Vec3 { x:((room_i * 16) - (8*16)) as f32, 
+                    y: 0.0, 
+                    z: (room_j * 11) as f32 + 5.0 };
+
+                commands.spawn( SceneBundle {
+                    scene: ground_scene.clone(),
+                    transform: Transform { translation: room_origin, 
+                        ..default() },
                     ..default()
-                });
+                } );
+
+                // test tiles
+                //if (room_j==0) && (room_i==8) {                                                        
+
+                  //  println!("Room Origin is {}", room_origin );
+
+                    for tile_j in 0..11 {
+                        for tile_i in 0..16 {
+
+                            // chance to spawn a tile
+                            if rng.gen::<f32>() < 0.1f32 {
+
+                                let rot : f32 = rng.gen::<f32>() * std::f32::consts::PI * 2.0;
+
+                                let tile_origin = Vec3 { x: ((tile_i as f32) - (16.0/2.0)) + room_origin.x + 0.5, 
+                                    y: 0.0, 
+                                    z: tile_j as f32 + room_origin.z - 5.0 };
+
+                                let tx = tile_origin.x + (tile_i as f32 - 8.0);
+                                //println!("Tile {} {} tx is {}", tile_i, tile_j, tile_origin );
+
+                                    commands.spawn( SceneBundle {
+                                        scene: canyon_scene.clone(),
+                                        transform: Transform { 
+                                            translation: tile_origin,
+                                            rotation: Quat::from_rotation_y( rot ),
+                                            ..default()
+                                          },
+                                        ..default()
+                                    });
+
+                            }
+
+                        }
+                    }
+                //}
+
             }
         }
 }
+
 
 /*
 fn add_people( mut commands: Commands ) {
@@ -262,7 +325,7 @@ fn toggle_debug_camera(
     }
 
     // Check for app exit
-    if (input.just_pressed( KeyCode::Escape )) {        
+    if input.just_pressed( KeyCode::Escape ) {
         app_exit_events.send(AppExit);
     }
 
@@ -298,10 +361,14 @@ fn player_controller(
             keyboard_input.pressed( KeyCode::Right ) {
                 move_x = move_x + move_speed;
             }
+        
 
         let curr = transforms.get( game.ent_player.unwrap() ).unwrap().clone();
         let curr_cam = transforms.get( game.ent_fps_camera.unwrap() ).unwrap().clone();
 
+        if keyboard_input.just_pressed( KeyCode::E ) {
+            println!("Player Pos is {}", curr_cam.translation );
+        }
         
         let cam_fwd = curr_cam.rotation * Vec3::Z;
 
@@ -344,7 +411,7 @@ fn mouse_look (
     mut transforms: Query<&mut Transform>,
 ) {
     let lookstr = time.delta_seconds();
-    let move_ang = 4.0 * (3.1416 / 180.0 );
+    let move_ang = 16.0 * (std::f32::consts::PI / 180.0 );
 
     for ev in motion_evr.iter() {
         //println!("Mouse moved: X: {} px, Y: {} px", ev.delta.x, ev.delta.y);
