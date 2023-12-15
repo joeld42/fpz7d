@@ -7,7 +7,7 @@ use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
     input::mouse::MouseMotion,
     gltf::{Gltf, GltfMesh}, 
-    transform::commands
+    transform::commands, pbr::NotShadowCaster
 };
 
  
@@ -47,14 +47,12 @@ struct DebugTools {
     dbg_cam : bool,
 }
 
-#[derive(Resource)]
-struct ZSceneAssets(Handle<Gltf>);
-
 #[derive(Resource,Default)]
 struct GameState {
     ent_player: Option<Entity>,
+    ent_lamp: Option<Entity>,
     ent_fps_camera: Option<Entity>,
-    ent_test: Option<Entity>,
+    //ent: Option<Entity>,
 }
 
 
@@ -85,21 +83,21 @@ fn fpz7_setup (
     // });
 
     // Kick off the gltf asset load
-    let gltf = asset_server.load("fpz7d.glb");
-    commands.insert_resource(ZSceneAssets(gltf) );
+    // let gltf = asset_server.load("fpz7d.glb");
+    // commands.insert_resource(ZSceneAssets(gltf) );
 
     // gamestate and player
     game.ent_player = Some(
         // commands.spawn(
         //         Transform::from_xyz( 0.0, 0.0, 0.0)
         //         ).id() );
-        commands.spawn(
+        commands.spawn((
             PbrBundle {
                 mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
                 material: materials.add(Color::rgb_u8(250, 60, 60).into()),
-                transform: Transform::from_xyz(0.0, 0.0, 0.0),
+                transform: Transform::from_xyz(0.0, 0.0, 0.0),                
                 ..default()
-            }).id() );
+            }, NotShadowCaster ) ).id() );
                 
 
     // cube
@@ -111,7 +109,7 @@ fn fpz7_setup (
     });
 
     // light
-    commands.spawn(PointLightBundle {
+    game.ent_lamp = Some( commands.spawn(PointLightBundle {
         point_light: PointLight {
             intensity: 1500.0,
             shadows_enabled: true,
@@ -119,7 +117,7 @@ fn fpz7_setup (
         },
         transform: Transform::from_xyz(4.0, 8.0, 4.0),
         ..default()
-    });
+    }).id() );
 
     // Camera
     game.ent_fps_camera = Some( commands.spawn(Camera3dBundle {
@@ -143,46 +141,6 @@ fn fpz7_setup (
 
 }
 
-
-
-fn test_blarg(
-    mut commands : Commands,
-    zassets : Res<ZSceneAssets>,
-    assets_gltf : Res<Assets<Gltf>>,
-    assets_gltfmesh: Res<Assets<GltfMesh>>,
-    mut game: ResMut<GameState>,    
-    ) 
-{
-        println!("in test blarg...");
-        if game.ent_test.is_none() {
-            if let Some(gltf) = assets_gltf.get( &zassets.0 ) {
-                
-                println!("Gltf is loaded.\n");
-                for (sname, scene) in &gltf.named_scenes {
-                    println!("Scene is {}", sname );
-                }
-
-                for ( name, node) in &gltf.named_nodes {
-                    println!("Node is {}", name );                    
-                }   
-                
-                //let chunk = assets_gltfmesh.get(&gltf.named_meshes["CanyonChunk"]).unwrap();
-
-                // game.ent_test = Some( commands.spawn( PbrBundle {
-                //          mesh: chunk.primitives[0].mesh.clone(),
-                //          material: chunk.primitives[0].material.clone().unwrap(),
-                //          ..default()
-                //     }).id() );
-
-                commands.remove_resource::<ZSceneAssets>();
-
-
-            } else {
-                println!("Gltf not loaded yet.\n");
-            }
-        }
-
-}
 
 // notes:
 //  zelda room size 16x11 tiles
@@ -334,6 +292,7 @@ fn toggle_debug_camera(
 fn player_controller(
     time: Res<Time>,
     game: Res<GameState>,
+    dbg: Res<DebugTools>,
     keyboard_input: Res<Input<KeyCode>>,
     mut transforms: Query<&mut Transform>,
     ) 
@@ -392,8 +351,13 @@ fn player_controller(
         
 
         let mut player_transform = transforms.get_mut(game.ent_player.unwrap()).unwrap();
+        //let player_offs = if dbg.dbg_cam { Vec3::ZERO } else { Vec3 { x : 0.0, y : -3.0, z : 0.0 } };
         player_transform.translation = upd_pos;
         player_transform.rotation = curr.rotation;
+
+        let mut lamp_transform = transforms.get_mut(game.ent_lamp.unwrap()).unwrap();
+        let lamp_offset = Vec3 { x : -2.0, y : 3.5, z : 0.0 };
+        lamp_transform.translation = upd_pos + lamp_offset;        
         
         let mut fps_camera_transform = transforms.get_mut(game.ent_fps_camera.unwrap()).unwrap();
         let fps_cam_offset = Vec3 { x : 0.0, y : 0.4, z : 0.0 };
