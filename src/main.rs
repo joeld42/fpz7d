@@ -26,17 +26,50 @@ struct Name(String);
 #[derive(Resource)]
 struct GreetTimer(Timer);
 
-pub struct HelloPlugin;
+// What object the tile represents.
+// It might only be part of the object like
+// for the big tree or canyon walls
+#[repr(u8)]
+enum TileObject {
+    EmptyGround,
+    RoughGround,  // Sandy tiles
+    Canyon,
+    Rock, // or is it a bush?
+    Tree,
+    BigTree,
+    Planks,
+    Stairs,
+    Statue,
+    Tombstone
+}
 
-impl Plugin for HelloPlugin {
+#[repr(u8)]
+enum TileBiome  {
+    Desert,
+    Grasslands,
+}
+
+struct RawTileData 
+{
+    code : u8,
+    tile : TileObject,
+    biome : TileBiome
+}
+
+pub struct FPZ7DGamePlugin;
+//{
+    //raw_tiles : [ RawTileData ; 256 * 88 ],
+//}
+
+impl Plugin for FPZ7DGamePlugin {    
+
     fn build( &self, app: &mut App ) {
         
         app.insert_resource( GreetTimer( Timer::from_seconds(2.0, TimerMode::Repeating)))
             .insert_resource(ClearColor(Color::rgb(0.3764, 0.47451, 0.6314 )))
             .init_resource::<DebugTools>()
             .init_resource::<GameState>()            
-            .add_systems( Startup, (fpz7_setup, map_setup) )
-            //.add_systems( Update, test_blarg )          
+            .add_systems( Startup, (fpz7_setup, map_setup) )            
             .add_systems( Update, toggle_debug_camera )            
             .add_systems( Update, player_controller )
             .add_systems( Update, mouse_look )
@@ -169,7 +202,7 @@ fn fpz7_setup (
 
 // notes:
 //  zelda room size 16x11 tiles
-// world map is 258x88 tiles (16x8 rooms)
+// world map is 256x88 tiles (16x8 rooms)
 
 fn map_setup (    
     asset_server: Res<AssetServer>,
@@ -446,23 +479,9 @@ fn mouse_look (
     }
 }
 
-/*
-fn greet_people( 
-    time: Res<Time>,
-    mut timer: ResMut<GreetTimer>, 
-    query: Query<&Name, With<Person>> ) {
-
-    if timer.0.tick( time.delta()).just_finished() {
-        for name in &query {
-            println!("hello {}!", name.0 );
-        }
-    }
-}
- */
-
 fn main() {
     App::new()
-        .add_plugins( (DefaultPlugins, HelloPlugin) )        
+        .add_plugins( (DefaultPlugins, FPZ7DGamePlugin) )        
         .run();
 
 }
