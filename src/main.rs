@@ -1,16 +1,21 @@
 //use std::fmt::Debug;
 
+//use std::cmp;
 use rand::Rng;
 use bevy::{
     prelude::*, 
     window::CursorGrabMode,
     app::{AppExit, ScheduleRunnerPlugin},
     input::mouse::MouseMotion,
-    gltf::{Gltf, GltfMesh}, 
+    gltf::{Gltf, GltfMesh},     
     transform::commands, pbr::NotShadowCaster
 };
+use bevy_easings::Lerp;
 
- 
+const STAB_TIME: f32 = 0.5;
+
+const STAB_EXTENT_A : f32 = 0.5; // local z when not stab
+const STAB_EXTENT_B : f32 = -0.2; // local z at max stab extent
 
 #[derive(Component)]
 struct Person;
@@ -50,11 +55,15 @@ struct DebugTools {
 #[derive(Resource,Default)]
 struct GameState {
     ent_player: Option<Entity>,
+    ent_sword: Option<Entity>,
     ent_lamp: Option<Entity>,
-    ent_fps_camera: Option<Entity>,
-    //ent: Option<Entity>,
+    ent_fps_camera: Option<Entity>,    
 }
 
+#[derive(Component, Default)]
+struct AttackState {
+    stabby_amt : f32, // set to 1.0 to play stab animation, will cool down to 0
+}
 
 fn fpz7_setup (
     asset_server: Res<AssetServer>,
@@ -86,20 +95,36 @@ fn fpz7_setup (
     // let gltf = asset_server.load("fpz7d.glb");
     // commands.insert_resource(ZSceneAssets(gltf) );
 
+    let sword_scene = asset_server.load("MasterSword.glb#Scene0");
+
     // gamestate and player
-    game.ent_player = Some(
-        // commands.spawn(
-        //         Transform::from_xyz( 0.0, 0.0, 0.0)
-        //         ).id() );
+    game.ent_player = Some(        
         commands.spawn((
             PbrBundle {
                 mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
                 material: materials.add(Color::rgb_u8(250, 60, 60).into()),
                 transform: Transform::from_xyz(0.0, 0.0, 0.0),                
                 ..default()
-            }, NotShadowCaster ) ).id() );
-                
+            }, 
+            NotShadowCaster,
+            AttackState { ..default() },
+        ) ).id() );
+           
+    // Player's sword
+    game.ent_sword = Some(
+        commands.spawn( SceneBundle {
+            scene: sword_scene.clone(),
+            transform: Transform { 
+                translation: Vec3 { x: 0.0, y : 0.0, z : STAB_EXTENT_A }, 
+                rotation: Quat::from_rotation_x( -std::f32::consts::PI / 2.0 ),
+                 ..default() },
+            ..default()
+        }  ).id() );
 
+    // parent sword to player
+    commands.entity(game.ent_player.unwrap()).push_children(&[game.ent_sword.unwrap()]);
+    
+    
     // cube
     commands.spawn(PbrBundle {
         mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
@@ -159,7 +184,6 @@ fn map_setup (
         // });
 
         let canyon_scene = asset_server.load("CanyonChunk.glb#Scene0");
-
         let ground_scene = asset_server.load("Ground.glb#Scene0");
 
         // commands.spawn( SceneBundle {
@@ -294,7 +318,9 @@ fn player_controller(
     game: Res<GameState>,
     dbg: Res<DebugTools>,
     keyboard_input: Res<Input<KeyCode>>,
+    mouse_buttons: Res<Input<MouseButton>>,
     mut transforms: Query<&mut Transform>,
+    mut attack: Query<&mut AttackState>,
     ) 
     {
         let move_speed = 2f32;
@@ -321,6 +347,18 @@ fn player_controller(
                 move_x = move_x + move_speed;
             }
         
+        // Apply attack
+        let mut attack = attack.get_mut( game.ent_player.unwrap() ).unwrap();                    
+        if mouse_buttons.just_pressed( MouseButton::Left ) && (!dbg.dbg_cam) {
+
+            // stab
+            attack.stabby_amt = STAB_TIME;
+        } else {
+            attack.stabby_amt = f32::max( 0.0, attack.stabby_amt - time.delta_seconds() );
+        }
+        
+        let stab_t = attack.stabby_amt / STAB_TIME;        
+
 
         let curr = transforms.get( game.ent_player.unwrap() ).unwrap().clone();
         let curr_cam = transforms.get( game.ent_fps_camera.unwrap() ).unwrap().clone();
@@ -334,11 +372,15 @@ fn player_controller(
         // Snap to ground for now (don't normalize this so we move slower when looking down)
         let cam_fwd = Vec3 { x: cam_fwd.x, y: 0.0,  z:cam_fwd.z };
 
-        let move_dir_fwd = cam_fwd;
-        let move_dir_right = Vec3::cross( Vec3::Y, cam_fwd ).normalize();
+        let move_dir_fwd = cam_fwd.normalize();
+        let move_dir_right = Vec3::cross( Vec3::Y, move_dir_fwd ).normalize();
+
+        // orthornormalize (this should be UP for now, but might need to change if we support slopes)
+        let move_dir_up = Vec3::cross( move_dir_fwd, move_dir_right ).normalize();
+        let M_facing_rot = Mat3 { x_axis : move_dir_right, y_axis: move_dir_up, z_axis: move_dir_fwd };
+        let facing_rot : Quat = Quat::from_mat3( &M_facing_rot );
 
             
-
         let upd_pos = curr.translation + 
             (move_dir_fwd * move_y * time.delta_seconds() ) +
             (move_dir_right * move_x * time.delta_seconds());
@@ -353,7 +395,14 @@ fn player_controller(
         let mut player_transform = transforms.get_mut(game.ent_player.unwrap()).unwrap();
         //let player_offs = if dbg.dbg_cam { Vec3::ZERO } else { Vec3 { x : 0.0, y : -3.0, z : 0.0 } };
         player_transform.translation = upd_pos;
-        player_transform.rotation = curr.rotation;
+        //player_transform.rotation = curr.rotation;
+        player_transform.rotation = facing_rot;
+
+        let mut sword_transform = transforms.get_mut(game.ent_sword.unwrap()).unwrap();
+
+        // FIXME: figure out how to call Lerp()
+        let stab_lerp = ((1.0 -stab_t) * STAB_EXTENT_A) + (stab_t * STAB_EXTENT_B);
+        sword_transform.translation = Vec3 { x : 0.0, y : 0.0, z : stab_lerp };
 
         let mut lamp_transform = transforms.get_mut(game.ent_lamp.unwrap()).unwrap();
         let lamp_offset = Vec3 { x : -2.0, y : 3.5, z : 0.0 };

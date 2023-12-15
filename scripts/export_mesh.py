@@ -30,6 +30,7 @@ def process_mesh( meshObj ):
     bpy.ops.export_scene.gltf(
         filepath=filename,
         use_selection = True,
+        export_apply =True,
     )
 
 def process_objs( ):
