@@ -1,6 +1,9 @@
 //use std::fmt::Debug;
 
 //use std::cmp;
+use std::fs::File;
+use std::io::{ self, BufRead, BufReader };
+
 use rand::Rng;
 use bevy::{
     prelude::*, 
@@ -26,10 +29,14 @@ struct Name(String);
 #[derive(Resource)]
 struct GreetTimer(Timer);
 
+#[derive(Resource)]
+struct RawTilemapData(Vec<RawTileData>);
+
 // What object the tile represents.
 // It might only be part of the object like
 // for the big tree or canyon walls
 #[repr(u8)]
+#[derive(Clone,Copy)]
 enum TileObject {
     EmptyGround,
     RoughGround,  // Sandy tiles
@@ -40,35 +47,44 @@ enum TileObject {
     Planks,
     Stairs,
     Statue,
-    Tombstone
+    Tombstone,
+
+    Unknown, // Something we don't support yet
 }
 
 #[repr(u8)]
+#[derive(Clone,Copy)]
 enum TileBiome  {
     Desert,
     Grasslands,
 }
 
+#[derive(Clone,Copy)]
 struct RawTileData 
 {
     code : u8,
+    blocked : bool,
     tile : TileObject,
     biome : TileBiome
 }
 
-pub struct FPZ7DGamePlugin;
-//{
-    //raw_tiles : [ RawTileData ; 256 * 88 ],
-//}
+pub struct FPZ7DGamePlugin
+{
+    hello : u32,
+    raw_tiles : Vec<RawTileData>,    
+}
 
 impl Plugin for FPZ7DGamePlugin {    
 
     fn build( &self, app: &mut App ) {
+
+        println!( "From Build, hello is {}, raw tiles count is {}", self.hello, self.raw_tiles.len() );
         
         app.insert_resource( GreetTimer( Timer::from_seconds(2.0, TimerMode::Repeating)))
             .insert_resource(ClearColor(Color::rgb(0.3764, 0.47451, 0.6314 )))
+            .insert_resource( RawTilemapData( self.raw_tiles.clone() ) )
             .init_resource::<DebugTools>()
-            .init_resource::<GameState>()            
+            .init_resource::<GameState>()
             .add_systems( Startup, (fpz7_setup, map_setup) )            
             .add_systems( Update, toggle_debug_camera )            
             .add_systems( Update, player_controller )
@@ -191,7 +207,7 @@ fn fpz7_setup (
             is_active: false,
             ..default()
         },
-        transform: Transform::from_xyz(0.0, 30.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),        
+        transform: Transform::from_xyz(0.0, 180.0, 100.0).looking_at(Vec3 { x: 0.0, y: 0.0, z: 40.0}, Vec3::Y),        
         ..default()
         },
         DebugCamera,
@@ -206,6 +222,7 @@ fn fpz7_setup (
 
 fn map_setup (    
     asset_server: Res<AssetServer>,
+    raw_map : Res<RawTilemapData>,
     mut commands : Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -217,13 +234,11 @@ fn map_setup (
         // });
 
         let canyon_scene = asset_server.load("CanyonChunk.glb#Scene0");
-        let ground_scene = asset_server.load("Ground.glb#Scene0");
-
-        // commands.spawn( SceneBundle {
-        //     scene: canyon_scene,
-        //     transform: Transform::from_xyz( 10.0, 0.0, 10.0 ),
-        //     ..default()
-        // });
+        let ground_scene = asset_server.load("Ground.glb#Scene0");        
+        
+        let raw_map = &raw_map.0;
+        // let t : RawTileData = raw_map[10];
+        // println!("Tile t is {}", t.blocked );
 
         for room_j in 0..8 {
             for room_i in 0..16 {
@@ -243,7 +258,7 @@ fn map_setup (
                 //     ..default()
                 // });
 
-                let room_origin = Vec3 { x:((room_i * 16) - (8*16)) as f32, 
+                let room_origin = Vec3 { x:(((room_i * 16) as f32) - ((8*16) as f32)), 
                     y: 0.0, 
                     z: (room_j * 11) as f32 + 5.0 };
 
@@ -257,13 +272,29 @@ fn map_setup (
                 // test tiles
                 //if (room_j==0) && (room_i==8) {                                                        
 
-                  //  println!("Room Origin is {}", room_origin );
+                  //  println!("Room Origin is {}", room_origin );                  
+                  let tile_i = 0;
+                  let tile_j = 0;
+                  let raw_ndx = (room_j + tile_j) * (16*16) + (room_i * 16) + tile_i;
+                  println!("Room {} {} raw_ndx {}", room_i, room_j, raw_ndx  );
 
                     for tile_j in 0..11 {
                         for tile_i in 0..16 {
 
+                            let raw_ndx = ((room_j * 11) + tile_j) * (16*16) + (room_i * 16) + tile_i;
+                            if (raw_ndx >= raw_map.len()) {
+                                 println!("Bad index, room {} {} tile {} {} ndx {}",
+                                         room_i, room_j, tile_i, tile_j, raw_ndx );
+                                         continue;
+                             }
+
+                            let tile : RawTileData = raw_map[ raw_ndx ];                            
+
+                            // let t : RawTileData = raw_map[10];
+
                             // chance to spawn a tile
-                            if rng.gen::<f32>() < 0.1f32 {
+                            //if rng.gen::<f32>() < 0.1f32 {
+                            if tile.blocked {
 
                                 let rot : f32 = rng.gen::<f32>() * std::f32::consts::PI * 2.0;
 
@@ -479,9 +510,67 @@ fn mouse_look (
     }
 }
 
+fn load_overworld( ) -> io::Result<Vec<RawTileData>>
+{
+    let mut raw_tiles = Vec::<RawTileData>::with_capacity( 256*88 );    
+
+    // Read the overworld tiles
+    let fp = File::open( "assets/nes_zelda_overworld_tile_map.txt")?;
+    let reader = BufReader::new(fp);    
+
+    for line in reader.lines() {
+        for tile_index_str in line.expect("Failed to read line")
+                .split_whitespace()
+                .map( |s| s.to_string() ) {
+                    let tile_index = i64::from_str_radix( tile_index_str.as_str(), 16 ).unwrap();
+
+                    let tile = match tile_index {
+                        0x02 | 0x0e => TileObject::EmptyGround,
+                        0x01 | 0x28 | 0x29 | 0x2a => TileObject::Canyon,
+                        _ => TileObject::Unknown
+                    };
+
+                    raw_tiles.push( RawTileData { 
+                            code: tile_index as u8, 
+                            blocked : false, 
+                            tile: tile, 
+                            biome: TileBiome::Desert })
+                }            
+    }
+
+    // Now read the blocking tiles
+    let fp = File::open( "assets/nes_zelda_overworld_blocking_map.txt")?;
+    //let fp = File::open( "assets/nes_zelda_overworld_blockTEST_map.txt")?;
+    let reader = BufReader::new(fp);    
+
+    let mut ndx = 0;
+    for line in reader.lines() {
+        for tile_blocking_str in line.expect("Failed to read line").chars() {            
+            
+            raw_tiles[ndx].blocked = match tile_blocking_str {
+                'X' => true,
+                '.' => false,
+                _ => { println!("Unexpected '{}'", tile_blocking_str); false }
+            };
+            ndx += 1;            
+        }
+        
+    }
+
+    println!("Map read {} tiles", raw_tiles.len() );
+
+    Ok(raw_tiles)
+}
+
 fn main() {
+
+    let game_plugin = FPZ7DGamePlugin { 
+        hello : 42,
+        raw_tiles : load_overworld().unwrap(),
+     };
+
     App::new()
-        .add_plugins( (DefaultPlugins, FPZ7DGamePlugin) )        
+        .add_plugins( (DefaultPlugins, game_plugin ) )        
         .run();
 
 }
